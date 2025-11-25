@@ -1,66 +1,37 @@
-name: Export CPI Package (All iFlows)
+name: Sync CPI Artifacts to GitHub
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"   # Daily at 11:30 AM IST
+    - cron: "30 14 * * *" # runs daily at 8 PM IST (optional)
 
 jobs:
-  export:
+  sync:
     runs-on: ubuntu-latest
 
-    env:
-      CLIENT_ID: ${{ secrets.CLIENT_ID }}
-      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-      OAUTH_URL: ${{ secrets.OAUTH_URL }}
-      CPI_HOST: ${{ secrets.CPI_HOST }}
-      PACKAGE_ID: ${{ secrets.PACKAGE_ID }}
+    container:
+      image: engswee/flashpipe:latest
 
     steps:
-    - name: Checkout Repo
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Install jq
-      run: sudo apt-get install jq
+      - name: Sync CPI artifacts using FlashPipe
+        uses: engswee/flashpipe-action/sync@v1
+        with:
+          tmn-host: ${{ secrets.CPI_HOST }}
+          oauth-host: ${{ secrets.OAUTH_URL }}
+          oauth-clientid: ${{ secrets.CLIENT_ID }}
+          oauth-clientsecret: ${{ secrets.CLIENT_SECRET }}
 
-    - name: Get OAuth Token
-      run: |
-        TOKEN=$(curl -s -X POST \
-        "$OAUTH_URL" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "grant_type=client_credentials&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET" | jq -r '.access_token')
+          # ✅ Your package name here
+          package-id: CPI_POC
 
-        if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-          echo "❌ Failed to fetch token. Check CLIENT_ID / CLIENT_SECRET / OAUTH_URL"
-          exit 1
-        fi
-        echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+          # ✅ Folder where artifacts will be saved in repo
+          dir-artifacts-relative: cpi-artifacts
 
-    - name: Get All Artifacts in Package
-      run: |
-        curl -s -X GET \
-        "$CPI_HOST/api/v1/IntegrationPackages('$PACKAGE_ID')/IntegrationDesigntimeArtifacts" \
-        -H "Authorization: Bearer $TOKEN" \
-        -H "Accept: application/json" \
-        -o artifacts.json
+          # ✅ Git commit message
+          git-commit-msg: "Auto sync from CPI tenant"
 
-        cat artifacts.json
-
-    - name: Download Each iFlow
-      run: |
-        mkdir -p exported
-        for id in $(jq -r '.d.results[].Id' artifacts.json); do
-          echo "⬇️ Downloading $id ..."
-          curl -s -X GET \
-          "$CPI_HOST/api/v1/IntegrationDesigntimeArtifacts(Id='$id',Version='active')/\$value" \
-          -H "Authorization: Bearer $TOKEN" \
-          -o "exported/$id.zip"
-        done
-
-    - name: Commit & Push to Git
-      run: |
-        git config user.name "github-actions"
-        git config user.email "actions@github.com"
-        git add exported/
-        git commit -m "Auto Export $(date)" || echo "✅ No changes to commit"
-        git push
+          # ✅ Recommended
+          sync-package-details: true
