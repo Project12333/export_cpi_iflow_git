@@ -1,52 +1,54 @@
-name: Export CPI iFlow
+name: Export CPI Package (All iFlows)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"   # Daily at 11:30 AM IST
 
 jobs:
   export:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+    - name: Checkout Repo
+      uses: actions/checkout@v3
 
-      - name: Install jq
-        run: sudo apt-get install jq -y
+    - name: Install jq
+      run: sudo apt-get install jq
 
-      - name: Get OAuth Token
-        run: |
-          TOKEN=$(curl -X POST \
-            "${{ secrets.CPI_TOKEN_URL }}" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "grant_type=client_credentials&client_id=${{ secrets.CPI_CLIENT_ID }}&client_secret=${{ secrets.CPI_CLIENT_SECRET }}" \
-            | jq -r '.access_token')
+    - name: Get OAuth Token
+      run: |
+        TOKEN=$(curl -s -X POST \
+        "$OAUTH_URL" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "grant_type=client_credentials&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET" | jq -r '.access_token')
+        echo "TOKEN=$TOKEN" >> $GITHUB_ENV
 
-          echo "TOKEN=$TOKEN" >> $GITHUB_ENV
+    - name: Get All Artifacts in Package
+      run: |
+        curl -s -X GET \
+        "$CPI_HOST/api/v1/IntegrationPackages('$PACKAGE_ID')/IntegrationDesigntimeArtifacts" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Accept: application/json" \
+        -o artifacts.json
 
-      - name: Download iFlow ZIP
-        run: |
-          curl -X GET \
-          "${{ secrets.CPI_URL }}/api/v1/IntegrationPackages('${{ secrets.CPI_PACKAGE_ID }}')/IntegrationDesigntimeArtifacts('${{ secrets.CPI_ARTIFACT_ID }}')/\$value" \
+        cat artifacts.json
+
+    - name: Download Each iFlow
+      run: |
+        mkdir -p exported
+        for id in $(jq -r '.d.results[].Id' artifacts.json); do
+          echo "Downloading $id ..."
+          curl -s -X GET \
+          "$CPI_HOST/api/v1/IntegrationDesigntimeArtifacts(Id='$id',Version='active')/\$value" \
           -H "Authorization: Bearer $TOKEN" \
-          -o iflow.zip
+          -o "exported/$id.zip"
+        done
 
-      - name: Debug ZIP
-        run: |
-          echo "--- FILE TYPE ---"
-          file iflow.zip
-          echo "--- FIRST 200 BYTES ---"
-          head -c 200 iflow.zip | cat
-
-      - name: Replace old iFlow
-        run: |
-          rm -rf "${{ secrets.CPI_ARTIFACT_ID }}"
-          unzip iflow.zip -d "${{ secrets.CPI_ARTIFACT_ID }}"
-
-      - name: Commit to Git
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add .
-          git commit -m "Auto export from CPI" || echo "No changes"
-          git push
+    - name: Commit & Push to Git
+      run: |
+        git config user.name "github-actions"
+        git config user.email "actions@github.com"
+        git add exported/
+        git commit -m "Auto Export $(date)" || echo "No changes to commit"
+        git push
