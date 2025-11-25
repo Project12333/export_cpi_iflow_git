@@ -1,21 +1,23 @@
-name: Export CPI iFlow to GitHub
+name: Export CPI iFlow
 
 on:
-  schedule:
-    - cron: "0 */6 * * *"   # every 6 hours
-  workflow_dispatch:        # manual run
+  workflow_dispatch:
 
 jobs:
-  export-iflow:
+  export:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout
         uses: actions/checkout@v3
+
+      - name: Install jq
+        run: sudo apt-get install jq -y
 
       - name: Get OAuth Token
         run: |
-          TOKEN=$(curl -X POST "${{ secrets.CPI_TOKEN_URL }}" \
+          TOKEN=$(curl -X POST \
+            "${{ secrets.CPI_TOKEN_URL }}" \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "grant_type=client_credentials&client_id=${{ secrets.CPI_CLIENT_ID }}&client_secret=${{ secrets.CPI_CLIENT_SECRET }}" \
             | jq -r '.access_token')
@@ -29,15 +31,19 @@ jobs:
           -H "Authorization: Bearer $TOKEN" \
           -o gmail_new.zip
 
-      - name: Prepare Folder
+      - name: Debug ZIP
+        run: |
+          head -c 200 gmail_new.zip | cat
+
+      - name: Replace old iFlow
         run: |
           rm -rf gmail
           unzip gmail_new.zip -d gmail
 
-      - name: Commit & Push Changes
+      - name: Commit to Git
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add gmail
-          git commit -m "Auto-export from CPI" || echo "No changes"
+          git add .
+          git commit -m "Auto export from CPI" || echo "No changes"
           git push
