@@ -2,12 +2,17 @@ name: Export CPI Package (All iFlows)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 6 * * *"   # Daily at 11:30 AM IST
 
 jobs:
   export:
     runs-on: ubuntu-latest
+
+    env:
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+      OAUTH_URL: ${{ secrets.OAUTH_URL }}
+      CPI_HOST: ${{ secrets.CPI_HOST }}
+      PACKAGE_ID: ${{ secrets.PACKAGE_ID }}
 
     steps:
     - name: Checkout Repo
@@ -22,33 +27,9 @@ jobs:
         "$OAUTH_URL" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "grant_type=client_credentials&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET" | jq -r '.access_token')
+
+        if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+          echo "❌ Failed to fetch token. Check CLIENT_ID / CLIENT_SECRET / OAUTH_URL"
+          exit 1
+        fi
         echo "TOKEN=$TOKEN" >> $GITHUB_ENV
-
-    - name: Get All Artifacts in Package
-      run: |
-        curl -s -X GET \
-        "$CPI_HOST/api/v1/IntegrationPackages('$PACKAGE_ID')/IntegrationDesigntimeArtifacts" \
-        -H "Authorization: Bearer $TOKEN" \
-        -H "Accept: application/json" \
-        -o artifacts.json
-
-        cat artifacts.json
-
-    - name: Download Each iFlow
-      run: |
-        mkdir -p exported
-        for id in $(jq -r '.d.results[].Id' artifacts.json); do
-          echo "Downloading $id ..."
-          curl -s -X GET \
-          "$CPI_HOST/api/v1/IntegrationDesigntimeArtifacts(Id='$id',Version='active')/\$value" \
-          -H "Authorization: Bearer $TOKEN" \
-          -o "exported/$id.zip"
-        done
-
-    - name: Commit & Push to Git
-      run: |
-        git config user.name "github-actions"
-        git config user.email "actions@github.com"
-        git add exported/
-        git commit -m "Auto Export $(date)" || echo "No changes to commit"
-        git push
